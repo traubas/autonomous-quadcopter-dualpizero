@@ -1,7 +1,8 @@
-
-
 from importlib import import_module
 import os
+#from ard import *
+from time import sleep
+import time
 import _thread
 import requests
 from flask import Flask, render_template, Response, request
@@ -14,45 +15,123 @@ else:
     from camera import Camera
 main_cam_numbers = None
 second_cam_numbers = None
-
+flyFlag=True
 flag = False
+numOfCommands = 0
+timetotal = 0
+currentFrame = None
 # Raspberry Pi camera module (requires picamera package)
 # from camera_pi import Camera
 
 app = Flask(__name__)
+#ard = QuadSerial()
 CORS(app)
-
+theframe = None
+def getFrame(camera,*args):
+    while 1:
+         global theframe
+         theframe = camera.theframe
 @app.route('/', methods = ["POST"])
 def index():
     """Video streaming home page."""
     return render_template('index.html')
 
 def gen(camera):
+    global flag
+    global flyFlag
+    global timetotal
+    global numOfCommands
+    global theframe
+    sleep(2)
+   
     """Video streaming generator function."""
     try:
-        _thread.start_new_thread(ask_for_numbers())
+        print("new thread try")
+        #_thread.start_new_thread(ask_for_numbers,())
+        #_thread.start_new_thread(flyDrone,())
+        thread.start_new_thread(getFrame,(camera,1))
     except:
         print("can't start new thread")
-    print("hi")
+    #print("hi")
+    #_thread.start_new_thread(flyDrone())
+    #sleep(2)
+    timeFlag=100
     while flag == False:
-        frame = camera.get_frame()
-        global main_cam_numbers
-        global second_cam_numbers
-        main_cam_numbers=camera.final_num.get('numbers')
+        #global main_cam_numbers
+        #global second_cam_numbers
+        #main_cam_numbers=camera.final_num.get('numbers')
         # DO SOMETHING WITH main_cam_numbers AND second_cam_numberes
         # ------------------- #
         # ------------------- #
         # FOR INSTANCE: take 2 strings and print them as below
-        if main_cam_numbers != None and second_cam_numbers != None:
-            print (main_cam_numbers+" "+second_cam_numbers)
+        #if main_cam_numbers != None and second_cam_numbers != None:
+        #    print (main_cam_numbers+" "+second_cam_numbers)
+        #if flyFlag == True:
+            #ard.send(0.5, 0.5, 0.1, 0.5)
         # END SOMEHTING HERE #
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        #theframe = camera.get_frame()    #<-----this function takes too much time. lowering streaming from 50fps to 10-13fps. make it better
+        if timeFlag>0:
+             numOfCommands = numOfCommands+1
+        timeofcommand = time.time()
+        theframe = camera.get_frame()
+        if theframe!=None:
+             yield (b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + theframe + b'\r\n')
+        timeofcommand = time.time()-timeofcommand
+        if timeFlag>0:
+             timetotal+=timeofcommand
+        if timeFlag==0:
+             print("the fps is:  ")
+             print(numOfCommands/timetotal)
+             print("average time for a command in seconds: ")
+             print(timetotal/numOfCommands)
+             print("number of commands/frames sent: ")
+             print(numOfCommands)
+        timeFlag=timeFlag-1
 
+@app.route('/moveTo', methods=["POST"])
+def moveTo():
+    ardu = QuadSerial()
+    if request.method == 'POST':
+        to = request.form['direction']
+        print(to)
+        if to == 'up':
+            ardu.send(0.5, 0.3, 0.02, 0.5)
+            #ardu.send(0.5, 0.5, 0.03, 0.5)
+        if to == 'down':
+            ardu.send(0.5, 0.7, 0.02, 0.5)
+            #ardu.send(0.5, 0.5, 0.03, 0.5)
+        if to == 'right':
+            ardu.send(0.7, 0.5, 0.02, 0.5)
+            #ardu.send(0.5, 0.5, 0.03, 0.5)
+        if to == 'left':
+            ardu.send(0.3, 0.5, 0.02, 0.5)
+            #ardu.send(0.5, 0.5, 0.03, 0.5)
+    return "moved forward"
 def ask_for_numbers():
     """helper function to get numbers from other pi"""
     requests.get("http://zero2.local:5000/get_num", timeout=(20,0.02))
     return 1
+
+def flyDrone():
+    #ard = QuadSerial()
+    while flyFlag==True:
+        ard.send(0.5, 0.5, 0.1, 0.5)
+        #ard.send(0.5, 0.5, 0.0, 0.5)
+    ard.send(0.5, 0.5, 0.0, 0.5)
+@app.route('/startFlying', methods=["POST"])
+def start():
+    global flyFlag
+    flyFlag = True
+    return ("starting")
+
+@app.route('/stopFlying', methods=["POST"])
+def stop():
+    global flyFlag
+    flyFlag = False
+    ard.send(0.5,0.5,0.0,0.5)
+    ard.send(0.5,0.5,0.0,0.5)
+    return ("stopping")
 
 @app.route('/video_feed')
 def video_feed():
@@ -93,4 +172,4 @@ def get_numbers():
         print(main_cam_numbers)
     return ("thanks you")
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', threaded=True)
+    app.run(host="0.0.0.0", threaded=True, port=5000)
